@@ -1,12 +1,13 @@
 // VLESS over WebSocket para sa Deno Deploy
 
 // PALITAN MO ITO ng sarili mong UUID (uuidgenerator.net)
-const UUID = "00000000-0000-4000-8000-000000000000";
+const UUID = "14320000-0000-4000-8000-000000001432";
 
 Deno.serve((req: Request) => {
   if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response("OK", { status: 200 });
   }
+  console.log("ws upgrade request", new URL(req.url).pathname);
   const { socket, response } = Deno.upgradeWebSocket(req);
   socket.binaryType = "arraybuffer";
   handleSession(socket);
@@ -28,12 +29,20 @@ function handleSession(ws: WebSocket) {
 
     const h = parseHeader(data);
     if (!h || h.command !== 1) { // TCP lang ang suportado
+      console.log(
+        "rejected: header invalid / UUID mismatch / not TCP. len=",
+        data.length,
+        "cmd=",
+        h?.command,
+      );
       safeClose(ws);
       return;
     }
     headerDone = true;
 
+    console.log("connecting to", h.address, h.port);
     const remote = await Deno.connect({ hostname: h.address, port: h.port });
+    console.log("connected to", h.address, h.port);
     writer = remote.writable.getWriter();
     pipeRemote(remote, ws, new Uint8Array([h.version, 0]));
 
@@ -43,7 +52,10 @@ function handleSession(ws: WebSocket) {
   // chain para sunod-sunod ang pagproseso ng mga mensahe
   ws.onmessage = (e) => {
     if (!(e.data instanceof ArrayBuffer)) return;
-    chain = chain.then(() => onMessage(e.data)).catch(() => safeClose(ws));
+    chain = chain.then(() => onMessage(e.data)).catch((err) => {
+      console.error("session error:", err);
+      safeClose(ws);
+    });
   };
   ws.onclose = () => {
     try { writer?.close(); } catch { /* ignore */ }
@@ -68,7 +80,9 @@ async function pipeRemote(remote: Deno.TcpConn, ws: WebSocket, header: Uint8Arra
         }
       },
     }));
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.error("pipe error:", err);
+  }
   safeClose(ws);
 }
 
